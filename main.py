@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram import F
 from dotenv import load_dotenv
+from yarl import URL
 
 # --- Load environment variables from .env ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,7 +38,8 @@ with get_db_connection() as conn:
         """
         CREATE TABLE IF NOT EXISTS courses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
+            name TEXT UNIQUE NOT NULL,
+            url TEXT UNIQUE NOT NULL
         )
         """
     )
@@ -68,15 +70,15 @@ with get_db_connection() as conn:
     cur = conn.execute("SELECT COUNT(*) AS cnt FROM courses")
     if cur.fetchone()["cnt"] == 0:
         conn.executemany(
-            "INSERT INTO courses (name) VALUES (?)",
-            [("Экспресс-грамматика",), ("Путешествия",)]
+            "INSERT INTO courses (name, url) VALUES (?, ?)",
+            [("Экспресс-грамматика", "https://t.me/+uKg4xGQ0MDtkMTBi"), ("Путешествия", "https://t.me/+umKj0R00Rb9jNzE6")]
         )
     conn.commit()
 
 # --- Helpers ---
 def load_courses():
     with get_db_connection() as conn:
-        return [row["name"] for row in conn.execute("SELECT name FROM courses ORDER BY id")]
+        return {row["name"]: row["url"] for row in conn.execute("SELECT name, url FROM courses ORDER BY id")}
 
 # Record payment only if not exists
 def record_payment(user_id: int, course: str) -> bool:
@@ -95,10 +97,11 @@ def record_payment(user_id: int, course: str) -> bool:
         return True
 
 # Course and support commands
-def add_course_to_db(name: str) -> bool:
+def add_course_to_db(name: str, url: str) -> bool:
     try:
         with get_db_connection() as conn:
-            conn.execute("INSERT INTO courses (name) VALUES (?)", (name,))
+            conn.execute("INSERT INTO courses (name, url) VALUES (?, ?)",
+                         (name,))
             conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -154,11 +157,18 @@ async def courses_handler(query: types.CallbackQuery):
 async def course_selection_handler(query: types.CallbackQuery):
     course = query.data.split(':', 1)[1]
     user_id = query.from_user.id
+    courses = load_courses()
+
+    kb = [[InlineKeyboardButton(text= f"Присоединяйтесь к {course}", url= courses[course])]]
+
     if record_payment(user_id, course):
         text = f"Спасибо, {query.from_user.first_name}! Вы записаны на курс '{course}'."
     else:
         text = f"Вы уже записаны на курс '{course}'."
-    await query.message.edit_text(text)
+
+    await query.message.edit_text(
+        text= text,
+        reply_markup= InlineKeyboardMarkup(inline_keyboard=kb))
     await query.answer()
 
 @dp.message(Command("support"))
@@ -178,11 +188,36 @@ async def support_message_handler(message: types.Message, state: FSMContext):
 
 @dp.message(Command("addcourse"))
 async def add_course_handler(message: types.Message):
-    course = message.get_args().strip()
-    if add_course_to_db(course):
-        await message.answer(f"Курс '{course}' добавлен.")
+    parts = message.text.split()
+
+    if parts[0].startswith('/addcourse'):
+        parts = parts[1:]
+
+    if len(parts) < 2:
+        return await message.reply(
+            "❗️ Пожалуйста, укажите и имя курса, и ссылку в последующем порядке.\n /addcourse имя_курса ссылка"
+        )
+
+    url_candidate = parts[-1]
+    name_parts = parts[:-1]
+    name = " ".join(name_parts)
+
+    try:
+        URL(url_candidate)
+        url = url_candidate
+    except Exception:
+        return await message.reply("🚫 Похоже, это не валидный URL.")
+
+    if add_course_to_db(name, url):
+        await message.reply(f"✅ Курс «{name}» добавлен с ссылкой:\n{url}")
     else:
-        await message.answer("Неверное имя или курс уже существует.")
+        await message.reply("🚫 Такой курс или URL уже есть.")
+
+    # course = message.get_args().strip()
+    # if add_course_to_db(course, url):
+    #     await message.answer(f"Курс '{course}' добавлен.")
+    # else:
+    #     await message.answer("Неверное имя или курс уже существует.")
 
 @dp.message(Command("renamecourse"))
 async def rename_course_handler(message: types.Message):
