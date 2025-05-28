@@ -2,6 +2,8 @@ import os
 import sqlite3
 import asyncio
 import logging
+from logging import Filter
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -10,6 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram import F
 from dotenv import load_dotenv
 from yarl import URL
+
 
 # --- Load environment variables from .env ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -213,11 +216,6 @@ async def add_course_handler(message: types.Message):
     else:
         await message.reply("🚫 Такой курс или URL уже есть.")
 
-    # course = message.get_args().strip()
-    # if add_course_to_db(course, url):
-    #     await message.answer(f"Курс '{course}' добавлен.")
-    # else:
-    #     await message.answer("Неверное имя или курс уже существует.")
 
 @dp.message(Command("renamecourse"))
 async def rename_course_handler(message: types.Message):
@@ -228,6 +226,35 @@ async def rename_course_handler(message: types.Message):
         )
     else:
         await message.answer("Использование: /renamecourse старое;новое")
+
+
+
+@dp.message(Command("addpost"))
+async def create_post(message: types.Message):
+    courses = load_courses()
+    kb = [[InlineKeyboardButton(text=c, callback_data=f"course_post:{c}", url= "https://t.me/c/2266340026/23?thread=18")] for c in courses]
+    await message.answer(
+        text="Выберите курс:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+
+@dp.callback_query(F.data.startswith("course_post:"))
+async def course_post_selecton_handler(query: types.CallbackQuery):
+    course = query.data.split(':', 1)[1]
+    await query.message.edit_text(
+        text= f"you chose course {course}"
+    )
+    await query.answer()
+
+
+async def send_post (post_text: str, chanel_id: str, markup: InlineKeyboardMarkup):
+    await bot.send_message(
+        chat_id= chanel_id,
+        text= post_text,
+        reply_markup= markup
+    )
+    await message
 
 @dp.message(CourseRequestForm.waiting_for_course_request)
 async def handle_course_request(message: types.Message, state: FSMContext):
@@ -252,6 +279,8 @@ async def handle_start_message(message: types.Message):
 @dp.message()
 async def handle_random_message(message: types.Message, state: FSMContext):
     save_new_user(message.from_user)
+    if message.forward_from_chat is not None:
+        print(message.forward_from_chat.id)
     await message.answer("Пожалуйста, напишите /start для начала работы.\n\nПосле этого напишите: 'I want to course', чтобы получить ссылку на канал.")
     await state.set_state(CourseRequestForm.waiting_for_course_request)
 
