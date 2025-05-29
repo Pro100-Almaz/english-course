@@ -4,12 +4,16 @@ import asyncio
 import logging
 from logging import Filter
 
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher
+from aiogram import types as aio_types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram import F
+from aiohttp.web_fileresponse import content_type
+from telethon import TelegramClient, functions
+from telethon import types as tele_types
 from dotenv import load_dotenv
 from yarl import URL
 
@@ -22,10 +26,19 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CURATOR_CHAT_ID = int(os.getenv("CURATOR_CHAT_ID", 0))
 DB_PATH = os.path.join(BASE_DIR, 'courses.db')
-
+API_ID = os.getenv("APP-API-ID")
+API_HASH = os.getenv("APP-API-HASH")
+bot_username = "devstage_chatbot"
 # --- States ---
 class SupportForm(StatesGroup):
     message = State()
+
+class ChannelCreateState(StatesGroup):
+    waiting_for_discription = State()
+
+class PostStates(StatesGroup):
+    choosing_course = State()
+    waiting_for_content = State()
 
 class CourseRequestForm(StatesGroup):
     waiting_for_course_request = State()
@@ -42,7 +55,8 @@ with get_db_connection() as conn:
         CREATE TABLE IF NOT EXISTS courses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL,
-            url TEXT UNIQUE NOT NULL
+            url TEXT UNIQUE NOT NULL,
+            channel_id TEXT NOT NULL DEFAULT '-1002519961960'
         )
         """
     )
@@ -79,9 +93,14 @@ with get_db_connection() as conn:
     conn.commit()
 
 # --- Helpers ---
-def load_courses():
+def load_courses_url():
     with get_db_connection() as conn:
         return {row["name"]: row["url"] for row in conn.execute("SELECT name, url FROM courses ORDER BY id")}
+
+def load_courses_id():
+    with get_db_connection() as conn:
+        return {row['name']: row['channel_id'] for row in conn.execute("SELECT name, channel_id FROM courses ORDER BY id")}
+
 
 # Record payment only if not exists
 def record_payment(user_id: int, course: str) -> bool:
@@ -100,11 +119,11 @@ def record_payment(user_id: int, course: str) -> bool:
         return True
 
 # Course and support commands
-def add_course_to_db(name: str, url: str) -> bool:
+def add_course_to_db(name: str, url: str, id: str) -> bool:
     try:
         with get_db_connection() as conn:
-            conn.execute("INSERT INTO courses (name, url) VALUES (?, ?)",
-                         (name,))
+            conn.execute("INSERT INTO courses (name, url, channel_id) VALUES (?, ?, ?)",
+                         (name, url, id))
             conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -118,7 +137,7 @@ def rename_course_in_db(old: str, new: str) -> bool:
         conn.commit()
         return cur.rowcount > 0
 
-def save_new_user(user: types.User):
+def save_new_user(user: aio_types.User):
     with get_db_connection() as conn:
         cur = conn.execute("SELECT 1 FROM users WHERE user_id = ?", (user.id,))
         if not cur.fetchone():
@@ -135,7 +154,7 @@ dp = Dispatcher()
 
 # --- Handlers ---
 @dp.message(Command("start"))
-async def start_handler(message: types.Message):
+async def start_handler(message: aio_types.Message):
     keyboard = [
         [InlineKeyboardButton(text="Курсы", callback_data="courses")],
         [InlineKeyboardButton(text="Эфиры", callback_data="lives")],
@@ -147,8 +166,8 @@ async def start_handler(message: types.Message):
     )
 
 @dp.callback_query(lambda c: c.data == "courses")
-async def courses_handler(query: types.CallbackQuery):
-    courses = load_courses()
+async def courses_handler(query: aio_types.CallbackQuery):
+    courses = load_courses_url()
     kb = [[InlineKeyboardButton(text=c, callback_data=f"course:{c}")] for c in courses]
     await query.message.edit_text(
         "Выберите курс:",
@@ -157,10 +176,10 @@ async def courses_handler(query: types.CallbackQuery):
     await query.answer()
 
 @dp.callback_query(F.data.startswith("course:"))
-async def course_selection_handler(query: types.CallbackQuery):
+async def course_selection_handler(query: aio_types.CallbackQuery):
     course = query.data.split(':', 1)[1]
     user_id = query.from_user.id
-    courses = load_courses()
+    courses = load_courses_url()
 
     kb = [[InlineKeyboardButton(text= f"Присоединяйтесь к {course}", url= courses[course])]]
 
@@ -175,12 +194,12 @@ async def course_selection_handler(query: types.CallbackQuery):
     await query.answer()
 
 @dp.message(Command("support"))
-async def support_entry(message: types.Message, state: FSMContext):
+async def support_entry(message: aio_types.Message, state: FSMContext):
     await message.answer("Напишите свое сообщение техподдержке:")
     await state.set_state(SupportForm.message)
 
 @dp.message(SupportForm.message)
-async def support_message_handler(message: types.Message, state: FSMContext):
+async def support_message_handler(message: aio_types.Message, state: FSMContext):
     await bot.forward_message(
         chat_id=CURATOR_CHAT_ID,
         from_chat_id=message.from_user.id,
@@ -190,35 +209,94 @@ async def support_message_handler(message: types.Message, state: FSMContext):
     await state.clear()
 
 @dp.message(Command("addcourse"))
-async def add_course_handler(message: types.Message):
+async def add_course_handler(message: aio_types.Message, state: FSMContext):
     parts = message.text.split()
 
     if parts[0].startswith('/addcourse'):
         parts = parts[1:]
+    if len(parts) < 1:
+        await message.answer("Напишите имя курса \n В формате: /addcourse <название-курса>")
+        return
 
-    if len(parts) < 2:
-        return await message.reply(
-            "❗️ Пожалуйста, укажите и имя курса, и ссылку в последующем порядке.\n /addcourse имя_курса ссылка"
-        )
+    course_name = "".join(parts)
+    await state.update_data(course_name= course_name)
+    await message.answer("Напишите описание для канала курса")
+    await state.set_state(ChannelCreateState.waiting_for_discription)
 
-    url_candidate = parts[-1]
-    name_parts = parts[:-1]
-    name = " ".join(name_parts)
+@dp.message(ChannelCreateState.waiting_for_discription)
+async def create_channel_handler(message: aio_types.Message, state: FSMContext):
+    data = await state.get_data()
+    course_name = data['course_name']
+    description = message.text.strip()
 
-    try:
-        URL(url_candidate)
-        url = url_candidate
-    except Exception:
-        return await message.reply("🚫 Похоже, это не валидный URL.")
+    channel_id, channel_link = await create_channel(course_name, description)
 
-    if add_course_to_db(name, url):
-        await message.reply(f"✅ Курс «{name}» добавлен с ссылкой:\n{url}")
+    if add_course_to_db(course_name, channel_link, str(channel_id)):
+        await message.reply(f"✅ Курс «{course_name}» добавлен с ссылкой:\n{channel_link} \n ID канала курса {channel_id}")
     else:
         await message.reply("🚫 Такой курс или URL уже есть.")
 
+    await state.clear()
+
+async def create_channel(channel_name: str, channel_discript: str):
+    client = TelegramClient(session= 'session', api_id= int(API_ID), api_hash= API_HASH)
+    await client.start()
+
+
+    result_chan = await client(functions.channels.CreateChannelRequest(
+        title= channel_name,
+        about= channel_discript,
+        broadcast=True,  # this makes it a channel, not a group
+        megagroup=False  # False → regular channel (private by default)
+    ))
+    channel = result_chan.chats[0]
+
+
+    result_grp = await client(functions.channels.CreateChannelRequest(
+        title=f'Discussion: {channel_name}',
+        about=f'Discussion of posts in {channel_name}',
+        broadcast=False,  # False + megagroup=True → supergroup
+        megagroup=True
+    ))
+    discussion = result_grp.chats[0]
+
+    await client(functions.channels.SetDiscussionGroupRequest(
+        broadcast=channel,  # the channel you created
+        group=discussion  # the supergroup you created
+    ))
+
+
+    bot_entity = await client.get_entity(bot_username)
+    await client(functions.channels.EditAdminRequest(
+        channel= channel,
+        user_id= bot_entity,
+        admin_rights=tele_types.ChatAdminRights(
+            post_messages=True,
+            edit_messages=True,
+            delete_messages=True,
+            ban_users=True,
+            invite_users=True,
+            change_info=True,
+            pin_messages=True,
+            add_admins=True
+        ),
+        rank="Channel Manager"  # optional label
+    ))
+
+    invite = await client(functions.messages.ExportChatInviteRequest(
+        peer=channel
+    ))
+    invite_link = invite.link
+    await client.disconnect()
+    #
+    # print('✅ Channel ID:', channel.id)
+    # print('✅ Discussion ID:', discussion.id)
+    # print('✅ Invite link:', invite_link)
+    return int(f"-100{channel.id}"), invite_link
+
 
 @dp.message(Command("renamecourse"))
-async def rename_course_handler(message: types.Message):
+async def rename_course_handler(message: aio_types.Message):
     args = message.get_args().split(';')
     if len(args) == 2 and rename_course_in_db(args[0].strip(), args[1].strip()):
         await message.answer(
@@ -228,36 +306,47 @@ async def rename_course_handler(message: types.Message):
         await message.answer("Использование: /renamecourse старое;новое")
 
 
-
 @dp.message(Command("addpost"))
-async def create_post(message: types.Message):
-    courses = load_courses()
-    kb = [[InlineKeyboardButton(text=c, callback_data=f"course_post:{c}", url= "https://t.me/c/2266340026/23?thread=18")] for c in courses]
+async def create_post(message: aio_types.Message, state: FSMContext):
+    courses = load_courses_id()
+
+    keyboard = [[InlineKeyboardButton(text=course, callback_data=f"course_id:{courses[course]}")] for course in courses]
+
     await message.answer(
-        text="Выберите курс:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+        "📚 Select the course channel to post into:",
+        reply_markup= InlineKeyboardMarkup(inline_keyboard= keyboard)
     )
 
+    await state.set_state(PostStates.choosing_course)
 
-@dp.callback_query(F.data.startswith("course_post:"))
-async def course_post_selecton_handler(query: types.CallbackQuery):
-    course = query.data.split(':', 1)[1]
-    await query.message.edit_text(
-        text= f"you chose course {course}"
+@dp.callback_query(lambda F: F.data.startswith("course_id:"), PostStates.choosing_course)
+async def course_choice_handler(callback: aio_types.CallbackQuery, state: FSMContext):
+     _, channel_id = callback.data.split(':', 1)
+
+     await callback.message.answer(
+         "✍️ Great! Now send me the message (text/photo/video/etc.) you want to post."
+     )
+     await state.clear()
+     await state.set_state(PostStates.waiting_for_content)
+     await state.update_data(target_channel_id= int(channel_id))
+
+@dp.message(PostStates.waiting_for_content)
+async def post_content_handler(message: aio_types.Message, state: FSMContext):
+    data = await state.get_data()
+    channel_id = data['target_channel_id']
+
+    await bot.copy_message(
+        chat_id= channel_id,
+        from_chat_id= message.chat.id,
+        message_id= message.message_id
     )
-    await query.answer()
 
+    await message.answer("✅ Your post has been published!")
+    await state.clear()
 
-async def send_post (post_text: str, chanel_id: str, markup: InlineKeyboardMarkup):
-    await bot.send_message(
-        chat_id= chanel_id,
-        text= post_text,
-        reply_markup= markup
-    )
-    await message
 
 @dp.message(CourseRequestForm.waiting_for_course_request)
-async def handle_course_request(message: types.Message, state: FSMContext):
+async def handle_course_request(message: aio_types.Message, state: FSMContext):
     if message.text.lower() == "i want to course":
         await message.answer("Вот ссылка на наш канал: https://t.me/+0Vf5IWnSGn5jMWNi")
     else:
@@ -265,7 +354,7 @@ async def handle_course_request(message: types.Message, state: FSMContext):
     await state.clear()
 
 @dp.message(lambda message: message.text == "start_message")
-async def handle_start_message(message: types.Message):
+async def handle_start_message(message: aio_types.Message):
     keyboard = [
         [InlineKeyboardButton(text="Кнопка 1", callback_data="button1")],
         [InlineKeyboardButton(text="Кнопка 2", callback_data="button2")],
@@ -277,7 +366,7 @@ async def handle_start_message(message: types.Message):
     )
 
 @dp.message()
-async def handle_random_message(message: types.Message, state: FSMContext):
+async def handle_random_message(message: aio_types.Message, state: FSMContext):
     save_new_user(message.from_user)
     if message.forward_from_chat is not None:
         print(message.forward_from_chat.id)
