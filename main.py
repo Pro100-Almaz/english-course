@@ -127,6 +127,18 @@ def update_record_payment(user_id: int) -> bool:
         return False
 
 # Course and support commands
+
+def not_admin(user_id: int) -> bool:
+    try:
+        with get_db_connection() as conn:
+            cur = conn.execute("SELECT * FROM admin WHERE user_id = ?",
+                         (user_id,))
+            if cur.fetchone():
+                return False
+            return True
+    except sqlite3.IntegrityError:
+        return False
+
 def add_course_to_db(name: str, url: str, id: str) -> bool:
     try:
         with get_db_connection() as conn:
@@ -190,37 +202,41 @@ async def check_payment(message: aio_types.Message, state: FSMContext):
         return await message.reply("Пожалуйста отправьте файл формата '.pdf'")
 
     # 2. Download the PDF
-    local_path = os.path.join(DOWNLOAD_DIR, doc.file_name)
-    file_obj = await bot.get_file(doc.file_id)
-    await bot.download_file(
-        file_path=file_obj.file_path,
-        destination=local_path
-    )
+    # local_path = os.path.join(DOWNLOAD_DIR, doc.file_name)
+    # file_obj = await bot.get_file(doc.file_id)
+    # await bot.download_file(
+    #     file_path=file_obj.file_path,
+    #     destination=local_path
+    # )
+    #
+    # check_text = pdf_images_to_text(local_path)
+    # metadata = PdfReader(local_path).metadata
 
-    await message.reply(f"✅ Saved to `{local_path}`", parse_mode="Markdown")
-
-    check_text = pdf_images_to_text(local_path)
-    metadata = PdfReader(local_path).metadata
-
-    if data_check(check_text, metadata):
+    # if data_check(check_text, metadata):
+    if True:
         if update_record_payment(message.from_user.id):
             print("Payment record updated succesfully")
-            await message.answer(text= "Your payment was accepted")
+            await message.answer(
+                text= "Your payment was accepted. \n You can join our main channel where we post important news and etc.",
+                reply_markup= InlineKeyboardMarkup(
+                    inline_keyboard= [[InlineKeyboardButton(text="Main Channel", url="https://t.me/+qpdCOmNRNxw5Mjhi")]]
+                )
+            )
         else:
             print("Payment record was not updated")
     else:
         await message.answer(text= "Wrong payment!")
     await state.clear()
 
-
-def data_check(check_text, metadata):
-    if metadata.author != 'Kaspi.kz':
-        return False
-
-    if '860 T' not in check_text or 'Epacpin 1.' not in check_text:
-        return False
-    return True
-
+#
+# def data_check(check_text, metadata):
+#     if metadata.author != 'Kaspi.kz':
+#         return False
+#
+#     if '860 T' not in check_text or 'Epacpin 1.' not in check_text:
+#         return False
+#     return True
+#
 
 
 @dp.callback_query(lambda c: c.data == "courses")
@@ -262,6 +278,8 @@ async def support_message_handler(message: aio_types.Message, state: FSMContext)
 
 @dp.message(Command("addcourse"))
 async def add_course_handler(message: aio_types.Message, state: FSMContext):
+    if not_admin(message.from_user.id):
+        return
     parts = message.text.split()
 
     if parts[0].startswith('/addcourse'):
@@ -349,6 +367,8 @@ async def create_channel(channel_name: str, channel_discript: str):
 
 @dp.message(Command("renamecourse"))
 async def rename_course_handler(message: aio_types.Message):
+    if not_admin(message.from_user.id):
+        return
     args = message.get_args().split(';')
     if len(args) == 2 and rename_course_in_db(args[0].strip(), args[1].strip()):
         await message.answer(
@@ -360,6 +380,8 @@ async def rename_course_handler(message: aio_types.Message):
 
 @dp.message(Command("addpost"))
 async def create_post(message: aio_types.Message, state: FSMContext):
+    if not_admin(message.from_user.id):
+        return
     courses = load_courses_id()
 
     keyboard = [[InlineKeyboardButton(text=course, callback_data=f"course_id:{courses[course]}")] for course in courses]
@@ -396,33 +418,12 @@ async def post_content_handler(message: aio_types.Message, state: FSMContext):
     await message.answer("✅ Your post has been published!")
     await state.clear()
 
-
-@dp.message(CourseRequestForm.waiting_for_course_request)
-async def handle_course_request(message: aio_types.Message, state: FSMContext):
-    if message.text.lower() == "i want to course":
-        await message.answer("Вот ссылка на наш канал: https://t.me/+0Vf5IWnSGn5jMWNi")
-    else:
-        await message.answer("Пожалуйста, напишите 'I want to course' для получения ссылки на канал.")
-    await state.clear()
-
-@dp.message(lambda message: message.text == "start_message")
-async def handle_start_message(message: aio_types.Message):
-    keyboard = [
-        [InlineKeyboardButton(text="Кнопка 1", callback_data="button1")],
-        [InlineKeyboardButton(text="Кнопка 2", callback_data="button2")],
-        [InlineKeyboardButton(text="Кнопка 3", callback_data="button3")]
-    ]
-    await message.answer(
-        "Выберите действие:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
-    )
-
 @dp.message()
 async def handle_random_message(message: aio_types.Message, state: FSMContext):
     save_new_user(message.from_user)
     if message.forward_from_chat is not None:
         print(message.forward_from_chat.id)
-    await message.answer("Пожалуйста, напишите /start для начала работы.\n\nПосле этого напишите: 'I want to course', чтобы получить ссылку на канал.")
+    await message.answer("Пожалуйста, напишите /start для начала работы.")
     await state.set_state(CourseRequestForm.waiting_for_course_request)
 
 # --- Main ---
