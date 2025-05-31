@@ -2,12 +2,6 @@ import os
 import sqlite3
 import asyncio
 import logging
-import fitz
-import pytesseract
-from ast import Param
-from importlib.metadata import metadata
-from logging import Filter
-
 
 from aiogram import Bot, Dispatcher
 from aiogram import types as aio_types
@@ -16,14 +10,11 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram import F
-from aiohttp.web_fileresponse import content_type
 from telethon import TelegramClient, functions
 from telethon import types as tele_types
 from dotenv import load_dotenv
-from yarl import URL
-from PyPDF2 import PdfReader
-from pdf2image import convert_from_path  # pip install pdf2image
 
+from check_validator import convert_from_path
 
 # --- Load environment variables from .env ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -124,25 +115,6 @@ def record_payment(user_id: int) -> bool:
         if cur.fetchone(): return True
         else: return False
 
-# Extracting files from pdf
-def extract_text_from_pdf(pdf: str) -> ():
-    """
-    Reads all pages of a PDF and returns the concatenated text.
-    """
-    doc = fitz.open(pdf)
-    reader = PdfReader(pdf)
-    metadata = reader.metadata
-
-    text = []
-    # Convert each PDF page to a PIL image
-    for img in convert_from_path(pdf):end
-
-        page_text = pytesseract.image_to_string(img, lang="eng")
-        text.append(page_text)
-
-    return metadata, "\n".join(text)
-    #
-
 
 # Course and support commands
 def add_course_to_db(name: str, url: str, id: str) -> bool:
@@ -218,12 +190,9 @@ async def check_payment(message: aio_types.Message, state: FSMContext):
 
     await message.reply(f"✅ Saved to `{local_path}`", parse_mode="Markdown")
 
-    try:
-        metadata, content = extract_text_from_pdf(local_path)
-
-
-    except Exception as e:
-        print(f"Error reading {local_path}: {e}")
+    check_text = convert_from_path(local_path)
+    if "3000 т" in check_text:
+        pass
 
     await state.clear()
 
