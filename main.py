@@ -202,22 +202,21 @@ async def check_payment(message: aio_types.Message, state: FSMContext):
         return await message.reply("Пожалуйста отправьте файл формата '.pdf'")
 
     # 2. Download the PDF
-    # local_path = os.path.join(DOWNLOAD_DIR, doc.file_name)
-    # file_obj = await bot.get_file(doc.file_id)
-    # await bot.download_file(
-    #     file_path=file_obj.file_path,
-    #     destination=local_path
-    # )
-    #
-    # check_text = pdf_images_to_text(local_path)
-    # metadata = PdfReader(local_path).metadata
+    local_path = os.path.join(DOWNLOAD_DIR, doc.file_name)
+    file_obj = await bot.get_file(doc.file_id)
+    await bot.download_file(
+        file_path=file_obj.file_path,
+        destination=local_path
+    )
 
-    # if data_check(check_text, metadata):
-    if True:
+    check_text = pdf_images_to_text(local_path)
+    metadata = PdfReader(local_path).metadata
+
+    if data_check(check_text, metadata):
         if update_record_payment(message.from_user.id):
             print("Payment record updated succesfully")
             await message.answer(
-                text= "Your payment was accepted. \n You can join our main channel where we post important news and etc.",
+                text= "Your payment was accepted. \nYou can join our main channel where we post important news and etc.",
                 reply_markup= InlineKeyboardMarkup(
                     inline_keyboard= [[InlineKeyboardButton(text="Main Channel", url="https://t.me/+qpdCOmNRNxw5Mjhi")]]
                 )
@@ -225,18 +224,20 @@ async def check_payment(message: aio_types.Message, state: FSMContext):
         else:
             print("Payment record was not updated")
     else:
+        os.remove(local_path)
         await message.answer(text= "Wrong payment!")
     await state.clear()
 
-#
-# def data_check(check_text, metadata):
-#     if metadata.author != 'Kaspi.kz':
-#         return False
-#
-#     if '860 T' not in check_text or 'Epacpin 1.' not in check_text:
-#         return False
-#     return True
-#
+
+def data_check(check_text, metadata):
+    # checks if the payment data is valid
+    if metadata.author != 'Kaspi.kz':
+        return False
+
+    if '860 T' not in check_text or 'Epacpin 1.' not in check_text:
+        return False
+    return True
+
 
 
 @dp.callback_query(lambda c: c.data == "courses")
