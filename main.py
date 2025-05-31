@@ -135,7 +135,8 @@ def extract_text_from_pdf(pdf: str) -> ():
 
     text = []
     # Convert each PDF page to a PIL image
-    for img in convert_from_path(pdf):
+    for img in convert_from_path(pdf):end
+
         page_text = pytesseract.image_to_string(img, lang="eng")
         text.append(page_text)
 
