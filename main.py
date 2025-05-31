@@ -2,6 +2,7 @@ import os
 import sqlite3
 import asyncio
 import logging
+from PyPDF2 import PdfReader
 
 from aiogram import Bot, Dispatcher
 from aiogram import types as aio_types
@@ -106,7 +107,6 @@ def load_courses_id():
 
 # Record payment only if not exists
 def record_payment(user_id: int) -> bool:
-
     with get_db_connection() as conn:
         cur = conn.execute(
             "SELECT 1 FROM payments WHERE user_id = ?",
@@ -115,6 +115,16 @@ def record_payment(user_id: int) -> bool:
         if cur.fetchone(): return True
         else: return False
 
+def update_record_payment(user_id: int) -> bool:
+    try:
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO payments (user_id) VALUES (?)",
+                (user_id, ))
+            conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
 
 # Course and support commands
 def add_course_to_db(name: str, url: str, id: str) -> bool:
@@ -191,10 +201,22 @@ async def check_payment(message: aio_types.Message, state: FSMContext):
     await message.reply(f"✅ Saved to `{local_path}`", parse_mode="Markdown")
 
     check_text = convert_from_path(local_path)
-    if "3000 т" in check_text:
-        pass
+    metadata = PdfReader(local_path).metadata
 
+    if data_check(check_text, metadata):
+        if update_record_payment(message.from_user.id):
+            print("Payment record updated succesfully")
+            await message.answer(text= "Your payment was accepted")
+        else:
+            print("Payment record was not updated")
+    else:
+        await message.answer(text= "Wrong payment!")
     await state.clear()
+
+
+def data_check(text, metadata):
+    print(text)
+    print(metadata)
 
 
 @dp.callback_query(lambda c: c.data == "courses")
