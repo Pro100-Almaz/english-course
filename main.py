@@ -15,7 +15,7 @@ from telethon import TelegramClient, functions
 from telethon import types as tele_types
 from dotenv import load_dotenv
 
-from check_validator import convert_from_path
+from check_validator import pdf_images_to_text
 
 # --- Load environment variables from .env ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +23,7 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 # --- Configuration ---
 
-DOWNLOAD_DIR = "downloads"
+DOWNLOAD_DIR = "./downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CURATOR_CHAT_ID = int(os.getenv("CURATOR_CHAT_ID", 0))
@@ -191,7 +191,6 @@ async def check_payment(message: aio_types.Message, state: FSMContext):
 
     # 2. Download the PDF
     local_path = os.path.join(DOWNLOAD_DIR, doc.file_name)
-
     file_obj = await bot.get_file(doc.file_id)
     await bot.download_file(
         file_path=file_obj.file_path,
@@ -200,7 +199,7 @@ async def check_payment(message: aio_types.Message, state: FSMContext):
 
     await message.reply(f"✅ Saved to `{local_path}`", parse_mode="Markdown")
 
-    check_text = convert_from_path(local_path)
+    check_text = pdf_images_to_text(local_path)
     metadata = PdfReader(local_path).metadata
 
     if data_check(check_text, metadata):
@@ -214,9 +213,14 @@ async def check_payment(message: aio_types.Message, state: FSMContext):
     await state.clear()
 
 
-def data_check(text, metadata):
-    print(text)
-    print(metadata)
+def data_check(check_text, metadata):
+    if metadata.author != 'Kaspi.kz':
+        return False
+
+    if '860 T' not in check_text or 'Epacpin 1.' not in check_text:
+        return False
+    return True
+
 
 
 @dp.callback_query(lambda c: c.data == "courses")

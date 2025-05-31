@@ -19,6 +19,5 @@ def pdf_images_to_text(pdf_path: str, dpi: int = 300, lang: str = 'eng') -> str:
         all_text.append(f"----- Page {page_num} -----\n")
         all_text.append(page_text)
         all_text.append("\n\n")
-
-    return "".join(all_text)
-
+    text = "\n".join(all_text)
+    return text
