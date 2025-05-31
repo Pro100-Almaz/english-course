@@ -2,7 +2,12 @@ import os
 import sqlite3
 import asyncio
 import logging
+import fitz
+import pytesseract
+from ast import Param
+from importlib.metadata import metadata
 from logging import Filter
+
 
 from aiogram import Bot, Dispatcher
 from aiogram import types as aio_types
@@ -16,6 +21,8 @@ from telethon import TelegramClient, functions
 from telethon import types as tele_types
 from dotenv import load_dotenv
 from yarl import URL
+from PyPDF2 import PdfReader
+from pdf2image import convert_from_path  # pip install pdf2image
 
 
 # --- Load environment variables from .env ---
@@ -23,6 +30,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 # --- Configuration ---
+
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CURATOR_CHAT_ID = int(os.getenv("CURATOR_CHAT_ID", 0))
 DB_PATH = os.path.join(BASE_DIR, 'courses.db')
@@ -30,6 +40,9 @@ API_ID = os.getenv("APP-API-ID")
 API_HASH = os.getenv("APP-API-HASH")
 bot_username = "devstage_chatbot"
 # --- States ---
+class PaymentState(StatesGroup):
+    awaiting_payment = State()
+
 class SupportForm(StatesGroup):
     message = State()
 
@@ -64,10 +77,8 @@ with get_db_connection() as conn:
         """
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            course TEXT NOT NULL,
-            paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, course)
+            user_id INTEGER UNIQUE NOT NULL,
+            paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -103,20 +114,34 @@ def load_courses_id():
 
 
 # Record payment only if not exists
-def record_payment(user_id: int, course: str) -> bool:
+def record_payment(user_id: int) -> bool:
+
     with get_db_connection() as conn:
         cur = conn.execute(
-            "SELECT 1 FROM payments WHERE user_id = ? AND course = ?",
-            (user_id, course)
+            "SELECT 1 FROM payments WHERE user_id = ?",
+            (user_id, )
         )
-        if cur.fetchone():
-            return False
-        conn.execute(
-            "INSERT INTO payments (user_id, course) VALUES (?, ?)",
-            (user_id, course)
-        )
-        conn.commit()
-        return True
+        if cur.fetchone(): return True
+        else: return False
+
+# Extracting files from pdf
+def extract_text_from_pdf(pdf: str) -> ():
+    """
+    Reads all pages of a PDF and returns the concatenated text.
+    """
+    doc = fitz.open(pdf)
+    reader = PdfReader(pdf)
+    metadata = reader.metadata
+
+    text = []
+    # Convert each PDF page to a PIL image
+    for img in convert_from_path(pdf):
+        page_text = pytesseract.image_to_string(img, lang="eng")
+        text.append(page_text)
+
+    return metadata, "\n".join(text)
+    #
+
 
 # Course and support commands
 def add_course_to_db(name: str, url: str, id: str) -> bool:
@@ -154,16 +179,53 @@ dp = Dispatcher()
 
 # --- Handlers ---
 @dp.message(Command("start"))
-async def start_handler(message: aio_types.Message):
-    keyboard = [
-        [InlineKeyboardButton(text="Курсы", callback_data="courses")],
-        [InlineKeyboardButton(text="Эфиры", callback_data="lives")],
-        [InlineKeyboardButton(text="Техподдержка", callback_data="support")]
-    ]
-    await message.answer(
-        "Добро пожаловать! Выберите раздел:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+async def start_handler(message: aio_types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    print(user_id)
+    if record_payment(user_id):
+        keyboard = [
+            [InlineKeyboardButton(text="Курсы", callback_data="courses")],
+            [InlineKeyboardButton(text="Эфиры", callback_data="lives")],
+            [InlineKeyboardButton(text="Техподдержка", callback_data="support")]
+        ]
+        await message.answer(
+            "Добро пожаловать! Выберите раздел:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+    else:
+        await message.answer(
+            text= "Пожалуйста совершите оплату: \n Отправьте каспи преревод на номер +7********** и отправьте квитанцию о переводе",
+        )
+        await state.set_state(PaymentState.awaiting_payment)
+
+@dp.message(PaymentState.awaiting_payment)
+async def check_payment(message: aio_types.Message, state: FSMContext):
+    doc = message.document
+
+    # 1. Check it’s a PDF
+    if doc.mime_type != "application/pdf" and not doc.file_name.lower().endswith(".pdf"):
+        return await message.reply("Пожалуйста отправьте файл формата '.pdf'")
+
+    # 2. Download the PDF
+    local_path = os.path.join(DOWNLOAD_DIR, doc.file_name)
+
+    file_obj = await bot.get_file(doc.file_id)
+    await bot.download_file(
+        file_path=file_obj.file_path,
+        destination=local_path
     )
+
+    await message.reply(f"✅ Saved to `{local_path}`", parse_mode="Markdown")
+
+    try:
+        metadata, content = extract_text_from_pdf(local_path)
+
+
+    except Exception as e:
+        print(f"Error reading {local_path}: {e}")
+
+    await state.clear()
+
 
 @dp.callback_query(lambda c: c.data == "courses")
 async def courses_handler(query: aio_types.CallbackQuery):
@@ -176,20 +238,14 @@ async def courses_handler(query: aio_types.CallbackQuery):
     await query.answer()
 
 @dp.callback_query(F.data.startswith("course:"))
-async def course_selection_handler(query: aio_types.CallbackQuery):
+async def course_selection_handler(query: aio_types.CallbackQuery, state: FSMContext):
     course = query.data.split(':', 1)[1]
     user_id = query.from_user.id
     courses = load_courses_url()
 
     kb = [[InlineKeyboardButton(text= f"Присоединяйтесь к {course}", url= courses[course])]]
-
-    if record_payment(user_id, course):
-        text = f"Спасибо, {query.from_user.first_name}! Вы записаны на курс '{course}'."
-    else:
-        text = f"Вы уже записаны на курс '{course}'."
-
     await query.message.edit_text(
-        text= text,
+        text= "Выберите курс который хотите пройти",
         reply_markup= InlineKeyboardMarkup(inline_keyboard=kb))
     await query.answer()
 
