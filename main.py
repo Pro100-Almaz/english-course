@@ -16,6 +16,7 @@ from telethon import types as tele_types
 from dotenv import load_dotenv
 
 from check_validator import pdf_images_to_text
+from basic_commands import *
 
 # --- Load environment variables from .env ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -175,23 +176,8 @@ dp = Dispatcher()
 # --- Handlers ---
 @dp.message(Command("start"))
 async def start_handler(message: aio_types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    print(user_id)
-    if record_payment(user_id):
-        keyboard = [
-            [InlineKeyboardButton(text="Курсы", callback_data="courses")],
-            [InlineKeyboardButton(text="Эфиры", callback_data="lives")],
-            [InlineKeyboardButton(text="Техподдержка", callback_data="support")]
-        ]
-        await message.answer(
-            "Добро пожаловать! Выберите раздел:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
-        )
-    else:
-        await message.answer(
-            text= "Пожалуйста совершите оплату: \n Отправьте каспи преревод на номер +7********** и отправьте квитанцию о переводе",
-        )
-        await state.set_state(PaymentState.awaiting_payment)
+    return start(message, state)
+
 
 @dp.message(PaymentState.awaiting_payment)
 async def check_payment(message: aio_types.Message, state: FSMContext):
