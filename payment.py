@@ -50,7 +50,7 @@ async def pre_checkout_query(pre_checkout_q: types.PreCheckoutQuery, bot: Bot):
 # successful payment
 async def successful_payment(message: types.Message, bot: Bot):
     print("SUCCESSFUL PAYMENT:")
-    db.record_payment(int(message.from_user.id))
+    db.update_record_payment(int(message.from_user.id))
     payment_info = message.successful_payment.dict()
     for k, v in payment_info.items():
         print(f"{k} = {v}")
