@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from aiogram import types as aio_types
-
+from aiogram.types import user
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'courses.db')
@@ -44,11 +44,19 @@ with get_db_connection() as conn:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS support (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE NOT NULL
+        )
+        """
+    )
     # Seed default courses
     cur = conn.execute("SELECT COUNT(*) AS cnt FROM courses")
     if cur.fetchone()["cnt"] == 0:
         conn.executemany(
-            "INSERT INTO courses (name, url) VALUES (?, ?)",
+            "INSERT INTO  courses (name, url) VALUES (?, ?)",
             [("Экспресс-грамматика", "https://t.me/+uKg4xGQ0MDtkMTBi"), ("Путешествия", "https://t.me/+umKj0R00Rb9jNzE6")]
         )
     conn.commit()
@@ -124,3 +132,30 @@ def save_new_user(user: aio_types.User):
                 (user.id, user.first_name, user.last_name, user.username)
             )
             conn.commit()
+
+def load_support():
+    with get_db_connection() as conn:
+        support = {row['id']: row['user_id'] for row in conn.execute("SELECT id, user_id FROM courses ORDER BY id")}
+        return next(iter(support.values()))
+
+def add_support(user_id: int):
+    with get_db_connection() as conn:
+        cur = conn.execute("SELECT 1 FROM users WHERE user_id = ?", (user.id,))
+        if not cur.fetchone():
+            conn.execute(
+                "INSERT INTO support (user_id) VALUES (?)",
+                (user_id,)
+            )
+            conn.commit()
+
+def delete_support(user_id: int):
+    with get_db_connection() as conn:
+        conn.execute(
+            "DELETE FROM support WHERE user_id = ?",
+            (user_id,)
+        )
+        conn.commit()
+
+def get_support():
+    with get_db_connection() as conn:
+        return {row['id']: row['user_id'] for row in conn.execute("SELECT id, user_id FROM support ORDER BY id")}

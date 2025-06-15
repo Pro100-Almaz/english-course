@@ -34,7 +34,6 @@ async def start_handler(message: aio_types.Message, state: FSMContext):
 async def course_page(call: CallbackQuery, state: FSMContext):
     return await courses.courses_handler(call, state)
 
-
 @dp.callback_query(lambda c: c.data == "back", courses.ButtonStates.main_page)
 async def start_page(call: CallbackQuery, state: FSMContext):
     return await basic_commands.start(call.message, state)
@@ -47,9 +46,22 @@ async def courses_handler(query: aio_types.CallbackQuery, state: FSMContext):
 async def course_selection_handler(query: aio_types.CallbackQuery, state: FSMContext):
     return await courses.course_selection_handler(query, state)
 
-@dp.message(Command("support"))
-async def support_entry(message: aio_types.Message, state: FSMContext):
-    return await support.support_entry(message, state)
+@dp.callback_query(lambda c: c.data == "support")
+async def support_handler(query: aio_types.CallbackQuery, state: FSMContext):
+    return await support.support_handler(query, state)
+
+@dp.callback_query(lambda c: c.data == "add_support")
+async def add_support_handler(query: aio_types.CallbackQuery):
+    return await support.add_support(query.message)
+
+@dp.callback_query(lambda c: c.data == "remove_support")
+async def delete_support_handler(query: aio_types.CallbackQuery):
+    return await support.delete_support(query.message)
+
+@dp.callback_query(lambda c: c.data == "get_support")
+async def get_support_handler():
+    return await support.get_support()
+
 
 @dp.message(support.SupportForm.message)
 async def support_message_handler(message: aio_types.Message, state: FSMContext):

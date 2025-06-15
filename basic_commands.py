@@ -1,11 +1,3 @@
-import os
-import asyncio
-
-from aiogram import types as aio_types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-
 from courses import *
 import db
 
