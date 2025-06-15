@@ -30,10 +30,18 @@ dp = Dispatcher()
 async def start_handler(message: aio_types.Message, state: FSMContext):
     return await basic_commands.start(message, state)
 
+@dp.callback_query(lambda c: c.data == "back", courses.ButtonStates.courses_page)
+async def course_page(call: CallbackQuery, state: FSMContext):
+    return await courses.courses_handler(call, state)
+
+
+@dp.callback_query(lambda c: c.data == "back", courses.ButtonStates.main_page)
+async def start_page(call: CallbackQuery, state: FSMContext):
+    return await basic_commands.start(call.message, state)
 
 @dp.callback_query(lambda c: c.data == "courses")
-async def courses_handler(query: aio_types.CallbackQuery):
-    return await courses.courses_handler(query)
+async def courses_handler(query: aio_types.CallbackQuery, state: FSMContext):
+    return await courses.courses_handler(query, state)
 
 @dp.callback_query(F.data.startswith("course:"))
 async def course_selection_handler(query: aio_types.CallbackQuery, state: FSMContext):

@@ -34,14 +34,22 @@ class PostStates(StatesGroup):
 class CourseRequestForm(StatesGroup):
     waiting_for_course_request = State()
 
+class ButtonStates(StatesGroup):
+    main_page = State()
+    courses_page = State()
 
-async def courses_handler(query: aio_types.CallbackQuery):
+
+
+async def courses_handler(query: aio_types.CallbackQuery, state: FSMContext):
     courses = db.load_courses_url()
     kb = [[InlineKeyboardButton(text=c, callback_data=f"course:{c}")] for c in courses]
+    kb.append([InlineKeyboardButton(text="Назад", callback_data="back")])
     await query.message.edit_text(
         "Выберите курс:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
+    await state.clear()
+    await state.set_state(ButtonStates.main_page)
     await query.answer()
 
 async def course_selection_handler(query: aio_types.CallbackQuery, state: FSMContext):
@@ -49,10 +57,15 @@ async def course_selection_handler(query: aio_types.CallbackQuery, state: FSMCon
     user_id = query.from_user.id
     courses = db.load_courses_url()
 
-    kb = [[InlineKeyboardButton(text= f"Присоединяйтесь к {course}", url= courses[course])]]
+    kb = [
+        [InlineKeyboardButton(text= f"Присоединяйтесь к {course}", url= courses[course])],
+        [InlineKeyboardButton(text="Назад", callback_data="back")]
+        ]
     await query.message.edit_text(
         text= "Выберите курс который хотите пройти",
         reply_markup= InlineKeyboardMarkup(inline_keyboard=kb))
+    await state.clear()
+    await state.set_state(ButtonStates.courses_page)
     await query.answer()
 
 async def add_course_handler(message: aio_types.Message, state: FSMContext):
