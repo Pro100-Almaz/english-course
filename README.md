@@ -1,7 +1,7 @@
 # english-course
 This project aimed to provide small businesses a chatbot with basic functionality
 
-- Channel creation -
+Channel creation 
 To channel creation to work you will need to get api-id and api-hash of telegram app 
 You’ll get your API ID and API Hash by registering an application on Telegram’s developer site:
 - Go to https://my.telegram.org and log in with the same phone number you use in your Telegram app.
